@@ -1,0 +1,166 @@
+---
+title: "Machine Learning Final Project "
+author: "Matilde V Rosa"
+date: "15 de Abril de 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+In this project, I used data from accelerometers on the belt, forearm, arm, and dumbell of 6 young health participants. They were asked to perform lifts correctly and incorrectly in 5 different ways: 
+
+1.	exactly according to the specification (Class A)
+2.	throwing the elbows to the front (Class B)
+3.	lifting the dumbbell only halfway (Class C)
+4.	lowering the dumbbell only halfway (Class D) 
+5.	throwing the hips to the front (Class E)
+
+The goal of this project is to predict the manner in which they did the exercise. 
+
+###	Load Packages
+
+```{r Matilde00, results='hide', message=FALSE, warning=FALSE}
+library(caret)
+library(data.table)
+library(ggplot2)
+library(rJava)
+library(FSelector)
+library(randomForest)
+```
+
+## 0.	Split into train and test samples
+
+Our train set is 75% of the original set.
+
+```{r Matilde0, results='hide', message=FALSE, warning=FALSE}
+dat = read.csv("C:/Users/JOAO/Desktop/ML/pml-training.csv",na.strings=c(""," ","NA"))
+set.seed(12345)
+ix <- sample(1:nrow(dat), size = nrow(dat) * 0.25)
+dat<-data.table(dat)
+dat_test <- dat[ix]
+dat_train<- dat[-ix]
+
+```
+
+## 1.	Data Exploration and Pre-Processing
+
+First of all, we need to see how our data is and how it behaves. 
+
+```{r Matilde1}
+dim(dat_train)
+```
+
+### 1.1.	Missing-values (NA and """)
+
+There are 100 variables with 14421 (98%) missing values. Those variables were removed from the dataset.
+
+```{r Matilde11}
+dat_train <- data.frame(dat_train)
+dat_train <-dat_train[,!sapply(dat_train, function(x) sum(is.na(x))) >= 14000]
+dim(dat_train)
+```
+
+### 1.2.	Zero Covariates
+
+There is 1 zero covariate.  This variable was removed from the dataset.
+
+```{r Matilde12}
+cols.with.nearzerovar <- nearZeroVar(dat_train)
+dat_train<- dat_train[, -cols.with.nearzerovar]
+dim(dat_train)
+```
+
+
+### 1.3.	Elimination of Index Variables
+
+```{r Matilde13}
+dat_train<-dat_train[,-c(1:2)]
+dim(dat_train)
+```
+
+
+## 2. Choosing the best predictors for the variable Classe
+
+```{r Matilde2}
+dt.information.gain <- information.gain(classe ~ . , dat_train)
+dt.information.gain <- data.table(varname = rownames(dt.information.gain), IG =dt.information.gain[,1])
+dt.information.gain <- dt.information.gain[IG > 0.3, ]  
+dt.information.gain[ order( - IG ) ]
+```
+
+We will clean our dataset in order to have just these 6 variables (which are the best predictors for the variable Classe) + the target variable Classe.
+
+```{r Matilde21}
+Colnames.information.gain <- names(dat_train) %in% dt.information.gain[,varname]
+Colindex.information.gain <- which(Colnames.information.gain, arr.ind = FALSE)
+dat_clean <- dat_train[,c(Colindex.information.gain,ncol(dat_train))]
+names(dat_clean)
+```
+
+## 3. Training the model with the chosen predictors
+
+With Cross Validation, we will divide the sample into 10 folds so then the model will train with 9 folds and test with the remaining one. It will iterate this procedure successively.
+
+```{r Matilde3}
+opts.trainning.cv <-
+  trainControl(  method        = 'repeatedcv' #Cross Validation
+               , number        = 10   #Number of folds
+               , verboseIter   = TRUE 
+               , repeats       = 3
+               , allowParallel = TRUE)
+```
+
+
+We will apply a Random Forest because this is a classification problem and Random Forests are one of the most common methods for this type of problems.
+
+```{r Matilde31 , results='hide', message=FALSE, warning=FALSE}
+model.rf <- train(classe ~ . , 
+                  data = dat_clean, 
+                  method = "rf" , 
+                  trControl = opts.trainning.cv, 
+                  metric= "Accuracy")
+```
+
+
+We used the evaluation measure Accuracy which weights false negatives and positives equally.
+
+```{r Matilde32}
+model.rf
+```
+
+The Accuracy is 99,95% which shows that our model is very accurate.
+Now we need to check the Out of Sample error i.e., the error when applying the model to the test set (as the test set did not contribute for training the model).
+
+## 4.	Testing the model with the test set
+
+Firstly, we need to pre-process the test set as we did with the training set (but in this case not removing variables).
+Then we will apply the final model to the test set.
+
+```{r Matilde4}
+rf.prediction  <- predict(object  = model.rf, newdata = dat_test)
+```
+
+### Out of Sample error
+
+The expected Out of Sample error is 0,08%.
+
+```{r Matilde5}
+dat_test[,predict:=rf.prediction]
+sum(dat_test[,classe] != dat_test[,predict])/length(dat_test[,classe])
+```
+
+## 5.	Predicting the Classe Variable for the 20 given cases
+
+```{r Matilde6}
+dat_test <- read.csv("C:/Users/JOAO/Desktop/ML/pml-testing.csv")
+rf.prediction  <- predict(object  = model.rf, newdata = dat_test)
+dat_test<-data.table(dat_test)
+
+data.frame(ID=dat_test$user_name,Prev=rf.prediction )
+```
+
+
